@@ -1,0 +1,399 @@
+#!/usr/bin/env python3
+
+import psycopg2
+import sys
+import time
+import traceback
+import subprocess
+from sql_config import db_1, db_2
+
+if db_1 is None or db_2 is None:
+    print("Please configure your database conncetions in sql_config.py")
+    sys.exit()
+
+if len(sys.argv) != 2:
+    print("Usage: ./psql_safe_merge schema1[,schema2,schema3,...]")
+    sys.exit()
+
+def tableMove(from_db, to_db, schemas, table):
+    print(schemas)
+    countyNames = table
+
+    confirm = "\nThis will attempt to move the"
+
+    for i in range(0, len(countyNames)):
+        if len(countyNames) == 1:
+            confirm += " '" + countyNames[i] + "'"
+        elif i == len(countyNames) - 1:
+            confirm += " and '" + countyNames[i] + "'"
+        else:
+            confirm += " '" + countyNames[i] + "',"
+
+    confirm += " table found in the"
+
+    for i in range(0, len(schemas)):
+        if len(schemas) == 1:
+            confirm += " '" + schemas[i] + "' schema"
+        elif i == len(schemas) - 1:
+            confirm += " and '" + schemas[i] + "' schemas"
+        else:
+            confirm += " '" + schemas[i] + "',"
+
+    confirm += " from " + from_db["host"] + " to " + to_db["host"]
+
+    print(confirm)
+
+    print("Starting... Please Do Not Stop For Any Reason!!!")
+
+    print("Getting connection to: " + from_db["host"])
+
+    serverConn = None
+    try:
+        serverConn = psycopg2.connect(f"dbname='{from_db['dbase']}' user='{from_db['user']}' host='{from_db['host']}' port='{from_db['port']}' password='{from_db['pass']}'")
+        print("Connected")
+    except:
+        print("Unable To Connect...")
+        sys.exit()
+
+    print("Gathering Information....")
+
+    executionLog = open("./merge.log", 'w')
+
+    for schema in schemas:
+        for county in countyNames:
+            getSchemaTables = serverConn.cursor()
+            getSchemaTables.execute(
+                "select table_name from information_schema.tables where table_schema = '" + schema + "' and table_name = '" + countyNames[0] + "'")
+            schemaTables = getSchemaTables.fetchall()
+
+            for table in schemaTables:
+                cmd = "pg_dump -h " + from_db["host"] + " -U " + from_db["user"] + " -c -t " + schema + "." + table[0] + " | psql -h " + to_db["host"] + " -U " + to_db["user"]
+                notice = "\n------------------------------------------------------------\nAttempting To Dump Table: " + schema + "." + \
+                         table[0] + " from " + from_db["host"] + " to " + to_db["host"] + "\n"
+                print(notice)
+                res1 = subprocess.check_output(cmd, shell=True)
+                output = res1.decode("utf-8")
+                print(output)
+                executionLog.write(notice + "\n" + output)
+
+    executionLog.close()
+
+    serverConn.commit()
+    serverConn.close()
+
+
+def schemaMove(from_db, to_db, schemas):
+    print(schemas)
+    countyNames = "*"
+
+    confirm = "\nAt confirmation this will attempt to move all"
+
+    for i in range(0, len(countyNames)):
+        if len(countyNames) == 1:
+            confirm += " '" + countyNames[i] + "'"
+        elif i == len(countyNames) - 1:
+            confirm += " and '" + countyNames[i] + "'"
+        else:
+            confirm += " '" + countyNames[i] + "',"
+
+    confirm += " tables found in the"
+
+    for i in range(0, len(schemas)):
+        if len(schemas) == 1:
+            confirm += " '" + schemas[i] + "' schema"
+        elif i == len(schemas) - 1:
+            confirm += " and '" + schemas[i] + "' schemas"
+        else:
+            confirm += " '" + schemas[i] + "',"
+
+    confirm += " from " + from_db["host"] + " to " + to_db["host"]
+
+    print(confirm)
+    confirmation = input(
+        '\n\tPLEASE CONFIRM(Y/N): ')
+
+    if "y" != confirmation.lower():
+        print("\n\tExecution Canceled")
+        sys.exit()
+
+    print("\nStarting Execution in...\n5")
+
+    j = 4
+    for i in range(0, 4):
+        time.sleep(1)
+        print(str(j - i))
+    time.sleep(1)
+    print("0")
+
+    print("Starting... Please Do Not Stop For Any Reason!!!")
+
+    print("Getting connection to: " + from_db["host"] + " and " + to_db["host"])
+
+    serverConn = None
+    try:
+        serverConn = psycopg2.connect(f"dbname='{from_db['dbase']}' user='{from_db['user']}' host='{from_db['host']}' port='{from_db['port']}' password='{from_db['pass']}'")
+        serverConn2 = psycopg2.connect(f"dbname='{to_db['dbase']}' user='{to_db['user']}' host='{to_db['host']}' port='{to_db['port']}' password='{to_db['pass']}'")
+        print("Connected")
+    except:
+        print("Unable To Connect...")
+        sys.exit()
+
+    print("Gathering Information....")
+
+    executionLog = open("./move_county.log", 'w')
+
+    for schema in schemas:
+        print("Creating schemas on destination database: " + schema)
+
+        createSchemaStmt = "CREATE SCHEMA " + schema + ";"
+        createSchemaQ = serverConn2.cursor()
+        createSchemaQ.execute(createSchemaStmt)
+        serverConn2.commit()
+
+        print("success...")
+
+        for county in countyNames:
+            getSchemaTables = serverConn.cursor()
+            getSchemaTables.execute(
+                "select table_name from information_schema.tables where table_schema = '" + schema + "'")
+            schemaTables = getSchemaTables.fetchall()
+
+            for table in schemaTables:
+                cmd = "pg_dump -h " + from_db["host"] + " -U " + from_db["user"] + " -c -t " + schema + "." + table[0] + " | psql -h " + to_db["host"] + " -U " + to_db["user"]
+                notice = "\n------------------------------------------------------------\nAttempting To Dump Table: " + schema + "." + \
+                         table[0] + " from " + from_db["host"] + " to " + to_db["host"] + "\n"
+                print(notice)
+                res1 = subprocess.check_output(cmd, shell=True)
+                output = res1.decode("utf-8")
+                print(output)
+                executionLog.write(notice + "\n" + output)
+
+    executionLog.close()
+
+    print("\nPlease view the log 'move_county.log' for execution details\nDONE!")
+    serverConn.commit()
+    serverConn.close()
+
+def schemaMerge(conn1, db_1, conn2, db_2, schema):
+    print("Each Table will be checked for collision.")
+
+    tables1Q = conn1.cursor()
+    tables2Q = conn2.cursor()
+
+    tablesStmt = "select table_name from information_schema.tables where table_schema = '" + schema + "'"
+
+    tables1Q.execute(tablesStmt)
+    tables2Q.execute(tablesStmt)
+
+    tables1row = tables1Q.fetchall()
+
+    allTables = set()
+
+    tables1 = []
+    for row in tables1row:
+        tables1.append(row[0])
+        allTables.add(row[0])
+
+    tables2row = tables2Q.fetchall()
+
+    tables2 = []
+    for row in tables2row:
+        tables2.append(row[0])
+        allTables.add(row[0])
+
+    allTables = list(allTables)
+
+    t_move_to_1 = []
+    t_move_to_2 = []
+    tablesBoth = []
+
+    for table in allTables:
+        print("Checking table: " + table)
+        foundIn1 = (table in tables1)
+        foundIn2 = (table in tables2)
+
+        if foundIn1 and foundIn2:
+            print("Found " + schema + "." + table + " on both servers.")
+            tablesBoth.append(table)
+
+        elif foundIn1 and not foundIn2:
+            t_move_to_2.append(table)
+            print("Found " + schema + "." + table + " on " + db_1["host"] + " and not on " + db_2["host"] + ". Will be moved.")
+        elif foundIn2 and not foundIn1:
+            t_move_to_1.append(table)
+            print("Found " + schema + "." + table + " on " + db_2 + " and not on "+ db_1 + ". Will be moved.")
+
+    if len(tablesBoth) > 0:
+        print("Collisions Detected in Schema: " + schema)
+
+        ct = 1
+
+        for table in tablesBoth:
+            print(str(ct) + "/" + str(len(tablesBoth)))
+            ct += 1
+            print("Comparing " + schema + "." + table + " from both servers..")
+
+            compare1Q = conn1.cursor()
+            compare2Q = conn2.cursor()
+
+            compareStmt = "select * from " + schema + "." + table + " limit 5"
+
+            compare1Q.execute(compareStmt)
+            compare2Q.execute(compareStmt)
+
+            compare1rows = compare1Q.fetchall()
+
+            print("\n\nShowing data for " + db_1)
+            for row in compare1rows:
+                print()
+                for col in row:
+                    colStr = str(col)
+                    colLen = 15
+
+                    if colLen > len(colStr):
+                        colLen = len(colStr)
+
+                    print(colStr[:colLen], end="-")
+
+            compare2rows = compare2Q.fetchall()
+
+            print("\n\nShowing data for " + db_2)
+            for row in compare2rows:
+                print()
+                for col in row:
+                    colStr = str(col)
+                    colLen = 15
+
+                    if colLen > len(colStr):
+                        colLen = len(colStr)
+
+                    print(colStr[:colLen], end="-")
+
+            conn1.commit()
+            conn2.commit()
+
+            badIn = True
+            while badIn:
+
+                badIn = False
+
+                keep = input("\nWhich would you like to keep?\n\t" + db_1 + " -> 1\n\t" + db_2 + " -> 2\n: ")
+
+                if keep == "1":
+                    tableMove(db_1, db_2, [schema], [table])
+                elif keep == "2":
+                    tableMove(db_2, db_1, [schema], [table])
+                else:
+                    badIn = True
+
+    if len(t_move_to_1) > 0:
+        print("Moving " + db_2["host"] + " tables to " + db_1["host"])
+        for table in t_move_to_1:
+            tableMove(db_2, db_1, [schema], [table])
+
+    if len(t_move_to_2) > 0:
+        print("Moving " + db_1["host"] + " tables to " + db_2["host"])
+        for table in t_move_to_2:
+            tableMove(db_1, db_2, [schema], [table])
+
+schemas = sys.argv[1].split(",")
+
+try:
+    conn1 = psycopg2.connect(f"dbname='{db_1['dbase']}' user='{db_1['user']}' host='{db_1['host']}' port='{db_1['port']}' password='{db_1['pass']}'")
+    conn2 = psycopg2.connect(f"dbname='{db_2['dbase']}' user='{db_2['user']}' host='{db_2['host']}' port='{db_2['port']}' password='{db_2['pass']}'")
+except:
+    print("Unable to obtain database connections...")
+    sys.exit()
+
+print("Connected...")
+
+confirm = "\nAt confirmation this will attempt to merge"
+
+for i in range(0, len(schemas)):
+    if len(schemas) == 1:
+        confirm += " '" + schemas[i] + "'"
+    elif i == len(schemas) - 1:
+        confirm += " and '" + schemas[i] + "'"
+    else:
+        confirm += " '" + schemas[i] + "',"
+
+confirm += " schemas on servers " + db_1["host"] + " and " + db_2["host"] + ", with the result being identical data on both servers in the given schemas.\nCollisions will be displayed."
+
+print(confirm)
+
+confirmation = input(
+    '\nTHIS ACTION CAN BE DANGEROUS!!!\n-PLEASE BE SURE THAT: \n\t-YOU KNOW WHAT YOU''RE DOING\n\t-THAT YOU HAVE BACKED UP ALL DATA\n\t-THAT YOU ARE RUNNING THIS FROM WITHIN A SCREEN OR SIMILAR ON A PERSISTANT CONNECTION\n\n\tPLEASE CONFIRM(Y/N): ')
+
+if "y" != confirmation.lower():
+    print("\nExecution Canceled")
+    sys.exit()
+
+print("\nStarting Execution in... [YOU CAN STILL CANCEL!!!] -> CTL+C\n5")
+
+j = 4
+for i in range(0, 4):
+    time.sleep(1)
+    print(str(j - i))
+time.sleep(1)
+print("0")
+
+print("Starting... Please Do Not Stop For Any Reason!!!")
+
+print("Checking Schemas...")
+
+print(schemas)
+
+move_to_1 = []
+move_to_2 = []
+merge = []
+
+
+schemaCk1 = conn1.cursor()
+schemaCk2 = conn2.cursor()
+
+schemaCkStmt = "select distinct schema_name from information_schema.schemata"
+
+schemaCk1.execute(schemaCkStmt)
+schemaCk2.execute(schemaCkStmt)
+
+schemas1row = schemaCk1.fetchall()
+schemas1 = []
+
+for row in schemas1row:
+    schemas1.append(row[0])
+
+schemas2row = schemaCk2.fetchall()
+schemas2 = []
+
+for row in schemas2row:
+    schemas2.append(row[0])
+
+for schema in schemas:
+    print("Checking Schema: " + schema)
+    foundIn1 = (schema in schemas1)
+    foundIn2 = (schema in schemas2)
+
+    if foundIn1 and foundIn2:
+        print("Found Schema " + schema + " on both servers. Will be merged, any collisions will be displayed.")
+        schemaMerge(conn1, db_1, conn2, db_2, schema)
+    elif foundIn1 and not foundIn2:
+        move_to_2.append(schema)
+        print("Found Schema " + schema + " on " + db_1["host"] + " and not on " + db_2["host"] + ". Will be moved.")
+    elif foundIn2 and not foundIn1:
+        move_to_1.append(schema)
+        print("Found Schema " + schema + " on " + db_2["host"] + " and not on "+ db_1["host"] + ". Will be moved.")
+    else:
+        print("Schema: " + schema + " not found on either server... skipping... ")
+
+
+if len(move_to_2) > 0:
+    print("Now moving " + db_1["host"] + " schemas to " + db_2["host"])
+    schemaMove(db_1, db_2, move_to_2)
+else:
+    print("No schemas to move to " + db_2 ["host"]+ ", Continuing...")
+
+if len(move_to_1) > 0:
+    print("Now moving " + db_2["host"] + " schemas to " + db_1["host"])
+    schemaMove(db_2, db_1, move_to_1)
+else:
+    print("No schemas to move to " + db_1["host"] + ", Continuing...")
