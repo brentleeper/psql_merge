@@ -8,7 +8,7 @@ import subprocess
 from sql_config import db_1, db_2
 
 if db_1 is None or db_2 is None:
-    print("Please configure your database conncetions in sql_config.py")
+    print("Please configure your database connections in sql_config.py")
     sys.exit()
 
 if len(sys.argv) != 2:
@@ -397,3 +397,5 @@ if len(move_to_1) > 0:
     schemaMove(db_2, db_1, move_to_1)
 else:
     print("No schemas to move to " + db_1["host"] + ", Continuing...")
+                             
+print("Done!")
